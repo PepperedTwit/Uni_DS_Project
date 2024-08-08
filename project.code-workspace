@@ -1,0 +1,17 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "latex-workshop.latex.outDir": "%DIR%/latex_out",
+        "terminal.integrated.defaultProfile.windows": "Git Bash",
+        "terminal.integrated.profiles.linux": {
+            "bash": {
+                "path": "bash",
+                "args": ["-c","-i","source ./Run.sh && exec bash"]
+            }
+        },
+    }
+}
