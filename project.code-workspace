@@ -5,13 +5,54 @@
         }
     ],
     "settings": {
-        "latex-workshop.latex.outDir": "%DIR%/latex_out",
+
         "terminal.integrated.defaultProfile.windows": "Git Bash",
         "terminal.integrated.profiles.linux": {
             "bash": {
                 "path": "bash",
-                "args": ["-c","-i","source ./Run.sh && exec bash"]
+                // "args": ["-c","-i","source ./Run.sh && exec bash"]
             }
         },
+
+        "latex-workshop.latex.outDir": "%WORKSPACE_FOLDER%/src/latex_out",
+        "latex-workshop.latex.tools": [
+            {
+                "name": "knitr",
+                "command": "Rscript",
+                "args": ["-e", "knitr::knit('%DOCFILE_EXT%', output='%WORKSPACE_FOLDER%/src/latex_out/%DOCFILE%.tex')",]
+            },
+            {
+                "name": "latexmk",
+                "command": "latexmk",
+                "args": ["-pdf", "-output-directory=%WORKSPACE_FOLDER%/src/latex_out", "%DOCFILE%.tex",]
+            }, 
+        ],
+        "latex-workshop.latex.recipes": [
+            {
+                "name": "build_clean_latex",
+                "tools": ["knitr", "latexmk",],
+            }
+        ],
+        "latex-workshop.latex.recipe.default": "build_clean_latex"
+
     }
 }
+
+//  ------------ Generic File structure ------------
+//  SomeProjectname (Workspace folder)
+//  ├── SomeProjectname.code-workspace
+//  ├── dat
+//  │   └── Raw data files etc.
+//  ├── src
+//  │   ├── assets
+//  │   │   ├── _uni_logo.png
+//  │   │   ├── _biblo.bib
+//  │   │   └── Processed data files etc.
+//  │   ├── latex
+//  │   │   ├── project.tex
+//  │   │   ├── project.pdf
+//  │   │   └── Other latex files etc.
+//  │   ├── project.Rnw
+//  │   ├── main.rs
+//  │   └── etc.
+//  ------------ Generic File structure ------------

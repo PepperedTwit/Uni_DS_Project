@@ -1,2 +1,4 @@
-Run.sh
-latex_out
+latex_out/
+dat/
+assets/
+Cargo.lock

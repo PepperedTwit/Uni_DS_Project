@@ -1,7 +1,7 @@
 [package]
-name = "comp3851_project"
+name = "change_me"
 version = "1.70.0"
 edition = "2021"
 
 [dependencies]
-util = {path = "C:\\Users\\ncncm\\OneDrive\\&Unencrypted\\Projects\\Rust\\Rust_Generics"}
+util = {path = "/mnt/Master/Documents/Rust/Rust_Generics"}

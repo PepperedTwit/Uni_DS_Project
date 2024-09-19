@@ -3,7 +3,7 @@
 version = 3
 
 [[package]]
-name = "comp3851"
+name = "change_me"
 version = "1.70.0"
 dependencies = [
  "util",
