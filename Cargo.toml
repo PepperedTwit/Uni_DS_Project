@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 util = {path = "/mnt/Master/Documents/Rust/Rust_Generics"}
+neon = "1.0.0"
