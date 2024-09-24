@@ -1,8 +1,8 @@
 [package]
-name = "change_me"
+name = "project"
 version = "1.70.0"
 edition = "2021"
 
 [dependencies]
 util = {path = "/mnt/Master/Documents/Rust/Rust_Generics"}
-neon = "1.0.0"
+pyo3 = { version = "0.18.0", features = ["auto-initialize"] }

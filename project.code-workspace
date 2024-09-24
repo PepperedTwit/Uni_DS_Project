@@ -6,25 +6,37 @@
     ],
     "settings": {
 
+        // ----------------------- Windows -----------------------
+
         "terminal.integrated.defaultProfile.windows": "Git Bash",
+        
+        // ------------------------ Linux ------------------------
+        
+        "terminal.integrated.env.linux": {
+            // "RUSTFLAGS": "-C link-arg=-Wl,-rpath,$HOME/miniconda3/lib",
+        },
+
         "terminal.integrated.profiles.linux": {
             "bash": {
                 "path": "bash",
-                // "args": ["-c","-i","source ./Run.sh && exec bash"]
+                "args": ["-c","-i",
+                "conda activate base && export RUSTFLAGS=\"-C link-arg=-Wl,-rpath,$HOME/miniconda3/lib\" && exec bash"]
             }
         },
 
-        "latex-workshop.latex.outDir": "%WORKSPACE_FOLDER%/src/latex_out",
+        // ------------------- Latex Workshop --------------------
+
+        "latex-workshop.latex.outDir": "latex_out",
         "latex-workshop.latex.tools": [
             {
                 "name": "knitr",
                 "command": "Rscript",
-                "args": ["-e", "knitr::knit('%DOCFILE_EXT%', output='%WORKSPACE_FOLDER%/src/latex_out/%DOCFILE%.tex')",]
+                "args": ["-e", "knitr::knit('%DOCFILE_EXT%', output='latex_out/%DOCFILE%.tex')",]
             },
             {
                 "name": "latexmk",
                 "command": "latexmk",
-                "args": ["-pdf", "-output-directory=%WORKSPACE_FOLDER%/src/latex_out", "%DOCFILE%.tex",]
+                "args": ["-pdf", "-output-directory=latex_out", "%DOCFILE%.tex",]
             }, 
         ],
         "latex-workshop.latex.recipes": [

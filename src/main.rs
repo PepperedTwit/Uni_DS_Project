@@ -1,37 +1,69 @@
-use neon::prelude::*;
-use neon::context::Context;
+use pyo3::prelude::*;
+use util::{Script, Show};
 
-fn scrape_website(mut cx: FunctionContext) -> JsResult<JsString> {
-    
-    let url = cx.argument::<JsString>(0)?.value(&mut cx);
-    
-    // Call the JavaScript scraping function
-    let global = cx.global();
+const SCRAPPER: Script = Script::new(r#"
+    import re
+    import requests
+    import json
+    from playwright.sync_api import Playwright, sync_playwright, expect
+    from datetime import datetime, timedelta
 
-    let scraper_module: Handle<JsObject> = global.get(&mut cx, "scraper")?;
+    def get_html(url: str) -> tuple[str, int | None]:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            page = context.new_page()
+            page.goto(url, timeout=60000)  # 60 second timeout
+            page.get_by_role("link", name="Financials & Documents").click()
 
-    let scrape_fn: Handle<JsFunction> = scraper_module.get(&mut cx, "scrapeWebsite")?;
+            curr_year = datetime.now().year
+            fnd_year = None
 
-    let result = scrape_fn.call(&mut cx, global, vec![cx.string(url)])?;
-    
-    Ok(result.downcast::<JsString>().or_throw(&mut cx)?)
+            for year in range(curr_year, curr_year - 5, -1):
+                selector = f'[title="View Annual Information Statement {year}"]'
+                if page.is_visible(selector):
+                    page.click(selector)
+                    fnd_year = year
+                    break
 
-}
+            if fnd_year is None:
+                browser.close()
+                return "No data found", fnd_year
 
-register_module!(mut cx, {cx.export_function("scrapeWebsite", scrape_website)});
+            # Wait for the content to load with a timeout
+            page.wait_for_selector('article.reports-ais', timeout=30000)  # 30 second timeout
 
+            html = page.content()
+            browser.close()
+            return html, fnd_year
 
-fn main() {
-    let url = "https://www.forbes.com/billionaires/page-data/index/page-data.json";
-    println!("Scraping: {}", url);
-    
-    // Initialize Node.js runtime and call the scrape_website function
-    let mut runtime = neon::runtime::Runtime::new().unwrap();
-    let result = runtime.run(|cx| {
-        let scrape_fn = cx.global().get::<JsFunction, _, _>(cx, "scrapeWebsite").unwrap();
-        let args = vec![cx.string(url)];
-        scrape_fn.call(cx, cx.undefined(), args)
-    }).unwrap();
-    
-    println!("Result: {:?}", result);
+"#);
+
+fn main() -> PyResult<()> {
+
+    println!("Scrapper script: {}", SCRAPPER);
+
+    Python::with_gil(|py| {
+
+        // Create a Python module from our SCRAPPER script
+        let scraper_module = PyModule::from_code(py, SCRAPPER.get(), "scraper.py", "scraper")?;
+
+        // URLs to scrape
+        let initial_url = "https://example.com";  // Replace with your target URL
+        let data_url = "https://example.com/data";  // Replace with your data URL
+
+        // Get cookies
+        let get_cookie_fn = scraper_module.getattr("get_cookie_playwright")?;
+        let cookies: Vec<PyObject> = get_cookie_fn.call1((initial_url,))?.extract()?;
+
+        // Make request with cookies
+        let req_with_cookie_fn = scraper_module.getattr("req_with_cookie")?;
+        let result: String = req_with_cookie_fn.call1((cookies, data_url))?.extract()?;
+
+        result.print();
+
+        Ok(())
+
+    })
+
 }
