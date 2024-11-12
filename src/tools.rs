@@ -1,8 +1,12 @@
+use core::panic;
 use std::io::Write;
+use std::cell::RefCell;
+
+thread_local! {static LOGGER: RefCell<Option<IOManager>> = RefCell::new(None);}
 
 // -------------------------------------------- Traits -------------------------------------------- //
 #[allow(unused)]
-pub trait ExtString: AsRef<str> {
+pub trait ExtString: AsRef<str> + Sized {
 
     fn unwrap_pat(&self, spat: &str, epat: &str) -> Option<&str> {
 
@@ -14,18 +18,36 @@ pub trait ExtString: AsRef<str> {
 
     }
 
-    fn send_to_stdout(&self) {
-        
-        writeln!(std::io::stdout().lock(), "{}", self.as_ref())
-            .expect("main::write_to_stdout - Failed to write to stdout.");
+    fn send_to_stdout<'a>(self) -> Self {
+
+        return LOGGER.with(|mng| {
+
+            if let Some(mng) = mng.borrow_mut().as_mut() {
+                
+                return mng.push_stdout(self);
+            
+            }
+
+            panic!("ExtString::send_to_stdout - No IOManager found in thread local storage.");
+
+        });
     
     }
 
-    fn send_to_stderr(&self) {
+    fn send_to_stderr<'a>(self) -> Self {
         
-        writeln!(std::io::stderr().lock(), "{}", self.as_ref())
-            .expect("Fail::send_stderr - Failed to write to stderr.");
-    
+        return LOGGER.with(|mng| {
+
+            if let Some(mng) = mng.borrow_mut().as_mut() {
+                
+                return mng.push_stdout(self);
+            
+            }
+
+            panic!("ExtString::send_to_stdout - No IOManager found in thread local storage.");
+
+        });
+
     }
 
 }
@@ -37,10 +59,14 @@ pub trait MapOption<'a,T>: Sized {
 }
 
 // -------------------------------------- Structures & Types -------------------------------------- //
-pub struct Fail<'a> {places: Vec<std::borrow::Cow<'a,str>>, msg: std::borrow::Cow<'a,str>}
+
+type STR<'a> = std::borrow::Cow<'a, str>;
 pub type Attempt<'a,T> = Result<T, Fail<'a>>;
+
+pub struct Fail<'a> {places: Vec<failure::ErrDetails<'a>>, msg: STR<'a>}
 pub struct JSON {root: serde_json::Value}
 pub struct Connection {stream: std::net::TcpStream}
+pub struct IOManager {stderr: std::fs::File, stdout: std::fs::File}
 
 // ------------------------------------------- Functions ------------------------------------------- //
 
@@ -58,7 +84,6 @@ mod extend_string {
     use crate::tools::ExtString;
 
     impl<T> ExtString for T where T: AsRef<str> {}
-    impl ExtString for str {}
 
 }
 
@@ -66,22 +91,34 @@ mod json_io {
 
     use crate::tools::*;
     use serde_json::Value;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
 
     impl JSON {
 
         pub fn new<'a>() -> Attempt<'a,Self> {
 
-            Ok(JSON {root: match std::env::args().nth(1) {
+            let raw = match std::env::args().nth(1) {
 
-                Some(raw) => match serde_json::from_str(&raw) {
-
-                    Ok(val) => val,
-                    Err(err) => return fail(format!("{:?}. \nInput: {}", err, raw)),
-
-                }
-        
+                Some(raw) => raw,
                 None => return fail("No JSON provided."),
-        
+
+            };
+
+            // Decode base64 to string
+            let json_str = match STANDARD.decode(&raw) {
+
+                Ok(bytes) => String::from_utf8(bytes)?,
+
+                _ => raw, // If it's not base64, just use the raw string
+
+            };
+
+            Ok(JSON {root: match serde_json::from_str(&json_str) {
+
+                Ok(val) => val,
+                Err(err) => return fail(format!("{:?}. \n\tInput: {}", err, json_str)),
+
             }})
 
         }
@@ -148,14 +185,15 @@ mod json_io {
 
 mod failure {
 
-    use std::borrow::Cow;
-    use crate::tools::{Fail, Attempt};
+    use crate::tools::{Fail, Attempt, STR};
 
-    pub trait ExtLocation {fn as_place<'a>(&'a self) -> String;}
-
+    pub trait ExtLocation {fn as_place<'a>(&'a self) -> ErrDetails<'a>;}
+    pub struct ErrDetails<'a> {file: STR<'a>, line: u32, function: String}
+    
     #[allow(unused)]
     pub mod fail {
 
+        use crate::ExtString;
         use super::*;
         use core::panic;
         use std::panic::Location;
@@ -163,14 +201,14 @@ mod failure {
 
         impl<'a> Fail<'a> {
 
-            pub fn new(place: &Location<'a>, msg: impl Into<Cow<'a,str>>) -> Self {
+            pub fn new(place: &'a Location<'a>, msg: impl Into<STR<'a>>) -> Self {
 
-                return Fail {places: vec![place.as_place().into()], msg: msg.into()};
+                return Fail {places: vec![place.as_place()], msg: msg.into()};
 
             }
 
             #[track_caller] 
-            pub fn panic<T>(msg: impl Into<std::borrow::Cow<'a,str>>) -> T {
+            pub fn panic<T>(msg: impl Into<STR<'a>>) -> T {
 
                 <Attempt<'a,T>>::Err(Fail::new(std::panic::Location::caller(), msg)).unwrap();
 
@@ -178,9 +216,9 @@ mod failure {
 
             }
 
-            pub fn from_debug(place: &Location<'a>, err: impl Debug) -> Self {
+            pub fn from_debug(place: &'a Location<'a>, err: impl Debug) -> Self {
 
-                return Fail {places: vec![place.as_place().into()], msg: format!("{:?}", err).into()};
+                return Fail {places: vec![place.as_place()], msg: format!("{:?}", err).into()};
 
             }
 
@@ -190,11 +228,20 @@ mod failure {
 
                 if len == 0 {panic!("Fail::show - No places in Fail struct");}
 
-                let mut out = format!("\n\tError: {} - {}\n", self.places[0], self.msg);
+                let detail = &self.places[0];
 
-                for i in 1..len {out += &format!("\t\t{}. {}\n", i, self.places[i]);}
+                let mut out = format!("\n\tError: {}", self.msg);
 
-                return out;
+                for i in 0..len {
+                    
+                    out += &format!("\n\t{} - {}, {}, {}\n", 
+                
+                        i, self.places[i].file, self.places[i].line, self.places[i].function
+
+                    );
+                }
+
+                return out.send_to_stderr();
 
             }
     
@@ -212,33 +259,17 @@ mod failure {
 
         impl From<serde_json::Error> for Fail<'_> {#[track_caller] fn from(err: serde_json::Error) -> Self {Fail::from_debug(Location::caller(), err)}}
 
-    }
-
-    mod extend {
-
-        use super::*;
-        use crate::tools::{MapOption, ExtResult, ExtString};
-
-        impl<'a,T> ExtResult<T> for Attempt<'a,T> {
-
-            fn unwrap_or_stderr(self) -> T {
-
-                self.unwrap_or_else(|e| {e.show().send_to_stderr(); std::process::exit(1);})
-
-            }
-
-        }
-
-        impl<'a,T> MapOption<'a,T> for Option<T> {}
+        impl From<std::string::FromUtf8Error> for Fail<'_> {#[track_caller] fn from(err: std::string::FromUtf8Error) -> Self {Fail::from_debug(Location::caller(), err)}}
 
     }
 
-    pub mod caller {
+    mod caller {
+
+        use super::{ExtLocation, ErrDetails, STR};
 
         use std::collections::HashMap;
         use std::cell::RefCell;
         use std::panic::Location;
-        use super::ExtLocation;
         use Type::*;
 
         const SRC: [(&str,&str); 2] = [
@@ -249,17 +280,17 @@ mod failure {
         // The path is the file name
         // The map is a hashmap of line numbers to function names and their kind
         
-        type PATH<'a> = std::borrow::Cow<'a, str>;
+        
         enum Type {Fn, Impl, Trait, Mod}
         struct CallMap<'a> {map: HashMap<u32, (&'a str, Type)>}
 
-        thread_local! {static FILE_CACHE: RefCell<HashMap<PATH<'static>, CallMap<'static>>> = RefCell::new(HashMap::new());}
+        thread_local! {static FILE_CACHE: RefCell<HashMap<STR<'static>, CallMap<'static>>> = RefCell::new(HashMap::new());}
 
         impl ExtLocation for Location<'_> {
             
-            fn as_place(&self) -> String {
+            fn as_place<'a>(&'a self) -> ErrDetails<'a> {
 
-                let file: PATH = self.file().to_string().into();
+                let file: STR = self.file().to_string().into();
                 let line: u32 = self.line();
                 let mut function = String::new();
 
@@ -316,7 +347,7 @@ mod failure {
     
                 });
 
-                return format!("{}, {}: {}", file, line, function);
+                return ErrDetails {file, line, function};
     
             }
         
@@ -513,6 +544,25 @@ mod failure {
 
     }
 
+    mod extend {
+
+        use super::*;
+        use crate::tools::{MapOption, ExtResult, ExtString};
+
+        impl<'a,T> ExtResult<T> for Attempt<'a,T> {
+
+            fn unwrap_or_stderr(self) -> T {
+
+                self.unwrap_or_else(|e| {e.show().send_to_stderr(); std::process::exit(1);})
+
+            }
+
+        }
+
+        impl<'a,T> MapOption<'a,T> for Option<T> {}
+
+    }
+
 }
 
 mod connection {
@@ -562,6 +612,97 @@ mod connection {
     }
 
     impl std::ops::Deref for Connection {type Target = TcpStream; fn deref(&self) -> &TcpStream {&self.stream}}
+
+}
+
+mod io_manager {
+
+    use super::{IOManager, Attempt, ExtString};
+    use std::fs::OpenOptions;
+    use std::path::Path;
+    use fs2::FileExt;
+    use std::io::Write;
+    use std::time::SystemTime;
+    use std::process;
+
+    const LOG: &str = "StdErr.log";
+    const OUT: &str = "StdOut.log";
+
+    impl IOManager {
+
+        pub fn new<'a>(root_folder: &str) -> Self {
+
+            let err = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(Path::new(root_folder).join(LOG))
+                .unwrap_or_else(|err| {
+
+                    println!("IOManager::new - Failed to access Error Log. {:?}", err);
+
+                    std::process::exit(1);
+
+                });
+
+            let out = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .append(true)
+                .open(Path::new(root_folder).join(OUT))
+                .unwrap_or_else(|err| {
+
+                    println!("IOManager::new - Failed to access Output Log. {:?}", err);
+
+                    std::process::exit(1);
+
+                });
+
+            err.lock_exclusive().expect("IOManager::new - Failed to lock Error Log.");
+            out.lock_exclusive().expect("IOManager::new - Failed to lock Output Log.");
+
+            return IOManager {stderr: err, stdout: out};
+        
+        }
+
+        fn format_log<'a>(content: &str) -> String {
+
+            let timestamp = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            return format!("\nTime: {}, PID: {}{}", timestamp, process::id(), content);
+
+        }
+
+        pub fn push_stdout<'a,T: ExtString>(&mut self, content: T) -> T {
+
+            writeln!(self.stdout, "{}", Self::format_log(content.as_ref())).unwrap();
+            self.stdout.sync_all().unwrap();  return content;
+
+        }
+
+        pub fn push_stderr<'a,T: ExtString>(&mut self, content: T) -> T {
+
+            writeln!(self.stderr, "{}", Self::format_log(content.as_ref())).unwrap();
+            self.stderr.sync_all().unwrap();  return content;
+
+        }
+
+    }
+
+    // Automatically release the lock when LockedFile is dropped
+    impl Drop for IOManager {
+
+        fn drop(&mut self) {
+
+            let _ = self.stderr.unlock();
+            let _ = self.stdout.unlock();
+
+        }
+    
+    }
 
 }
 
